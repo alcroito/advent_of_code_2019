@@ -80,6 +80,27 @@ def restore_gravity_assist_program():
     print(memory[0])
 
 
+def get_the_answer_to_life_the_universe_and_everything(noun, verb):
+    print(100 * int(noun) + int(verb))
+
+
+def restore_gravity_assist_program_real():
+    memory = get_numbers(get_file_contents())
+    memory_backup = list(memory)
+
+    for noun in range(0, 100):
+        for verb in range(0, 100):
+            memory[1] = noun
+            memory[2] = verb
+            run_program(memory)
+            if memory[0] == 19690720:
+                get_the_answer_to_life_the_universe_and_everything(noun, verb)
+                return
+            memory = list(memory_backup)
+
+
 if __name__ == '__main__':
     # unittest.main()
     restore_gravity_assist_program()
+    restore_gravity_assist_program_real()
+
