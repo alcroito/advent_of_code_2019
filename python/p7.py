@@ -4,6 +4,7 @@ import functools
 import operator
 import typing
 import itertools
+import enum
 
 
 def get_file_contents() -> str:
@@ -15,7 +16,7 @@ def get_file_contents() -> str:
     return lines[0]
 
 
-def get_numbers(line: str) -> typing.List[int]:
+def get_int_code_instructions(line: str) -> typing.List[int]:
     return [int(x) for x in line.strip().split(",")]
 
 
@@ -41,11 +42,98 @@ def get_memory_value(memory: typing.List[int], value: int, mode: int) -> int:
 operators = {1: operator.add, 2: operator.mul, 5: operator.ne, 6: operator.eq, 7: operator.lt, 8: operator.eq}
 
 
+class InstructionResultType(enum.Enum):
+    Halt = 1
+    Interrupt = 2
+    AdvanceIP = 3
+
+
+class InstructionResult(object):
+    def __init__(self):
+        self._result_type = None
+        self._value = None
+
+    @staticmethod
+    def create(result_type: InstructionResultType, value: typing.Any):
+        r = InstructionResult()
+        r._result_type = result_type
+        r._value = value
+        return r
+
+    @staticmethod
+    def advance_ip(value: int):
+        return InstructionResult.create(InstructionResultType.AdvanceIP, value)
+
+    @staticmethod
+    def halt():
+        return InstructionResult.create(InstructionResultType.Halt, None)
+
+    @staticmethod
+    def interrupt():
+        return InstructionResult.create(InstructionResultType.Interrupt, None)
+
+    def type(self) -> InstructionResultType:
+        return self._result_type
+
+    def value(self) -> typing.Any:
+        return self._value
+
+
+class ProgramStateType(enum.Enum):
+    Created = 1
+    Running = 2
+    Interrupted = 3
+    Halted = 4
+
+
+class ProgramState(object):
+    def __init__(self):
+        self._state_type = None
+        self._memory = None
+        self._ip = None
+
+    def __str__(self):
+        s = "ip {} s {} m {}".format(self.ip, self.state, self.memory)
+        return s
+
+    @staticmethod
+    def create(memory: typing.List[int], ip: int, state_type: ProgramStateType = ProgramStateType.Created):
+        s = ProgramState()
+        s._state_type = state_type
+        s._memory = memory
+        s._ip = ip
+        return s
+
+    @property
+    def state(self) -> ProgramStateType:
+        return self._state_type
+
+    @state.setter
+    def state(self, value):
+        self._state_type = value
+
+    @property
+    def memory(self) -> typing.List[int]:
+        return self._memory
+
+    @memory.setter
+    def memory(self, value):
+        self._memory = value
+
+    @property
+    def ip(self) -> int:
+        return self._ip
+
+    @ip.setter
+    def ip(self, value):
+        self._ip = value
+
+
 def run_instruction(ip: int,
                     memory: typing.List[int],
                     input_values: typing.List[int],
                     output_values: typing.List[int]
-                    ) -> typing.Optional[int]:
+                    ) -> InstructionResult:
     op, p_modes = decode_instruction(memory[ip])
 
     def get_params(param_count: int) -> typing.List[int]:
@@ -56,24 +144,28 @@ def run_instruction(ip: int,
         return params
 
     if op == 99:  # Halt
-        return None
+        return InstructionResult.halt()
     elif op == 1 or op == 2:  # Add or multiply x, y into z
         input_1, input_2, output_address = get_params(3)
         memory[output_address] = functools.reduce(operators[op], [input_1, input_2])
-        return 4
+        return InstructionResult.advance_ip(4)
     elif op == 3:  # Input into x
+        # No input values, interrupt program, save state, allow to resume
+        # later.
+        if not input_values:
+            return InstructionResult.interrupt()
         output_address = memory[ip + 1]
         memory[output_address] = input_values.pop(0)
-        return 2
+        return InstructionResult.advance_ip(2)
     elif op == 4:  # Output into x
         output_values.append(get_memory_value(memory, ip + 1, p_modes[0]))
-        return 2
+        return InstructionResult.advance_ip(2)
     elif op == 5 or op == 6:  # If x != 0 or x == 0, jump to y address
         input_1, input_2 = get_params(2)
 
         if operators[op](input_1, 0):
-            return input_2 - ip
-        return 3
+            return InstructionResult.advance_ip(input_2 - ip)
+        return InstructionResult.advance_ip(3)
     elif op == 7 or op == 8:  # If x < y or x == y, z = 1, otherwise z = 0
         input_1, input_2, output_address = get_params(3)
 
@@ -81,66 +173,103 @@ def run_instruction(ip: int,
             memory[output_address] = 1
         else:
             memory[output_address] = 0
-        return 4
+        return InstructionResult.advance_ip(4)
 
 
-def run_program(memory: typing.List[int],
-                input_values: typing.List[int],
-                output_values: typing.List[int]
-                ) -> typing.List[int]:
-    ip = 0
+def resume_program_helper(p: ProgramState,
+                          input_values: typing.List[int],
+                          output_values: typing.List[int]
+                          ) -> ProgramState:
+
+    ip = p.ip
+    memory = p.memory
+    p.state = ProgramStateType.Running
     while ip < len(memory):
-        advance = run_instruction(ip, memory, input_values, output_values)
-        if advance is None:
+        result = run_instruction(ip, memory, input_values, output_values)
+        result_type = result.type()
+        if result_type == InstructionResultType.AdvanceIP:
+            ip += result.value()
+        elif result_type == InstructionResultType.Halt:
+            p.ip = ip
+            p.state = ProgramStateType.Halted
             break
-        else:
-            ip += advance
-    return memory
+        elif result_type == InstructionResultType.Interrupt:
+            p.state = ProgramStateType.Interrupted
+            p.ip = ip
+            break
+
+    return p
 
 
-def run_program_str(input_str: str,
+def resume_program(p: ProgramState,
+                   input_values: typing.List[int],
+                   output_values: typing.List[int]) -> ProgramState:
+    p = resume_program_helper(p, input_values, output_values)
+    return p
+
+
+def create_program_str(input_program: str) -> ProgramState:
+    memory = get_int_code_instructions(input_program)
+    p = ProgramState.create(memory, 0)
+    return p
+
+
+def run_program_str(input_program: str,
                     input_values: typing.List[int],
                     output_values: typing.List[int]
-                    ) -> typing.List[int]:
-    return run_program(get_numbers(input_str), input_values, output_values)
+                    ) -> ProgramState:
+    p = create_program_str(input_program)
+    return resume_program(p, input_values, output_values)
 
 
 def run_program_for_amplifiers(input_program: str,
-                               phases_list: typing.List[int],
-                               feedback_mode: bool = False) -> int:
+                               phases_list: typing.List[int]) -> int:
     last_signal_output = 0
-    for i in range(5):
-        output_values = []
-        input_values = [int(phases_list[i]), last_signal_output]
-        run_program_str(input_program, input_values, output_values)
-        last_signal_output = output_values[0]
+    amplifier_programs = [create_program_str(input_program) for _ in range(5)]
+    program_interrupted = True
+    resumes_count = 0
+    while program_interrupted:
+        program_interrupted = False
+        for i in range(5):
+            output_values = []
+            input_values = []
+            if resumes_count == 0:
+                input_values.insert(0, phases_list[i])
+            input_values.append(last_signal_output)
+            p = resume_program(amplifier_programs[i], input_values, output_values)
+            if p.state == ProgramStateType.Interrupted:
+                program_interrupted = True
+            last_signal_output = output_values[0]
+        resumes_count += 1
     return last_signal_output
 
 
 def get_max_thruster_signal(input_program: str,
-                            initial_phase_permutation: str,
-                            feedback_mode: bool = False) -> int:
+                            initial_phase_permutation: str) -> int:
     phase_permutations = itertools.permutations(initial_phase_permutation)
 
     def to_phase_list(phase: typing.Tuple[typing.Any]) -> typing.List[int]:
         return [int(e) for e in phase]
 
-    max_signal = max(run_program_for_amplifiers(input_program, to_phase_list(phase), feedback_mode)
+    max_signal = max(run_program_for_amplifiers(input_program, to_phase_list(phase))
                      for phase in phase_permutations)
     return max_signal
 
 
 class Tests(unittest.TestCase):
     def run_program_check_output(self: unittest.TestCase,
-                                 input_str: str,
+                                 input_program: str,
                                  input_values: typing.List[int],
                                  expected_output_values: typing.List[int]):
         output_values = []
-        run_program_str(input_str, input_values, output_values)
+        run_program_str(input_program, input_values, output_values)
         self.assertEqual(output_values, expected_output_values)
 
-    def assert_max_thrust(self, input_program: str, max_thrust: int):
-        signal = get_max_thruster_signal(input_program, "01234")
+    def assert_max_thrust(self,
+                          input_program: str,
+                          max_thrust: int,
+                          initial_phase_permutation: str = "01234"):
+        signal = get_max_thruster_signal(input_program, initial_phase_permutation)
         self.assertEqual(signal, max_thrust)
 
     def test_samples(self):
@@ -177,14 +306,32 @@ class Tests(unittest.TestCase):
         self.assert_max_thrust("3,31,3,32,1002,32,10,32,1001,31,-2,31,1007,31,0,33,1002,33,7,33,1,33,31,31,1,32,31,"
                                "31,4,31,99,0,0,0", 65210)
 
+        self.assert_max_thrust("3,26,1001,26,-4,26,3,27,1002,27,2,27,1,27,26,27,4,27,1001,28,-1,28,1005,28,6,99,0,0,5",
+                               139629729,
+                               initial_phase_permutation="56789")
+
+        self.assert_max_thrust("3,52,1001,52,-5,52,3,53,1,52,56,54,1007,54,5,55,1005,55,26,1001,54,-5,54,1105,1,12,1,"
+                               "53,54,53,1008,54,0,55,1001,55,1,55,2,53,55,53,4,53,1001,56,-1,56,1005,56,6,99,0,0,0,"
+                               "0,10",
+                               18216,
+                               initial_phase_permutation="56789")
+
 
 def part1():
     input_program = get_file_contents()
-    max_signal = get_max_thruster_signal(input_program, "01234")
+    max_signal = get_max_thruster_signal(input_program, initial_phase_permutation="01234")
     print(max_signal)
     assert max_signal == 99376
 
 
+def part2():
+    input_program = get_file_contents()
+    max_signal = get_max_thruster_signal(input_program, initial_phase_permutation="56789")
+    print(max_signal)
+    assert max_signal == 8754464
+
+
 if __name__ == '__main__':
     part1()
+    part2()
     unittest.main()
