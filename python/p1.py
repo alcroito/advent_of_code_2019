@@ -1,6 +1,10 @@
 import math
 import unittest
 import os
+from itertools import takewhile, chain
+from functional import seq
+from fn import _
+from fn.iters import iterate as fn_iterate
 
 
 def compute_module_fuel(module_mass):
@@ -45,6 +49,42 @@ def get_file_contents():
     return lines
 
 
+def module_fuel():
+    lines = get_file_contents()
+    fuel = sum(int(l) // 3 - 2 for l in lines)
+    return fuel
+
+
+def module_fuel_overall():
+    lines = get_file_contents()
+
+    def poor_man_iterate(seed, func):
+        while True:
+            seed = func(seed)
+            yield seed
+
+    def poor_man_flat_map(i):
+        return chain.from_iterable(i)
+
+    r = sum(
+        poor_man_flat_map(
+            takewhile(lambda x: x > 0,
+                      poor_man_iterate(int(module_mass), lambda x: x // 3 - 2))
+            for module_mass in lines)
+    )
+    return r
+
+
+def module_fuel_overall_2():
+    r = (seq(get_file_contents())
+         .map(int)
+         .flat_map(lambda mass: seq(fn_iterate(_ // 3 - 2, mass))
+                   .take_while(_ > 0)
+                   .drop(1))
+         .sum())
+    return r
+
+
 class Tests(unittest.TestCase):
     def test_fuel(self):
         self.assertEqual(compute_module_fuel(12), 2)
@@ -59,6 +99,10 @@ class Tests(unittest.TestCase):
 
 
 if __name__ == '__main__':
+    print(module_fuel())
     print(compute_sum_of_module_fuel())
+
+    print(module_fuel_overall())
+    print(module_fuel_overall_2())
     print(compute_sum_of_module_fuel_realistic())
-    # unittest.main()
+    unittest.main()
