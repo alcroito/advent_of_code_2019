@@ -16,6 +16,10 @@ path = "src/d1.rs"
 name = "d2"
 path = "src/d2.rs"
 
+[[bin]]
+name = "d5"
+path = "src/d5.rs"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
