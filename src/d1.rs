@@ -1,25 +1,4 @@
-use std::fs;
-
-fn get_data_from_file(name: &str) -> Option<String> {
-    let path = format!("data/{}.txt", name);
-
-    let contents = match fs::read_to_string(path) {
-        Ok(s) => Some(s),
-        Err(e) => {
-            println!("Error reading data: {}", e);
-            None
-        }
-    };
-    contents
-}
-
-fn lines_to_ints(contents: &str) -> Vec<i32> {
-    let mut ints = Vec::new();
-    for s in contents.split_ascii_whitespace() {
-        ints.push(s.parse::<i32>().unwrap());
-    }
-    ints
-}
+use advent::helpers;
 
 fn compute_module_fuel(module_mass: i32) -> i32 {
     (module_mass as f64 / 3.0).floor() as i32 - 2
@@ -50,16 +29,16 @@ fn compute_module_fuel_realistic_with_wizardry(ints: &Vec<i32>) -> i32 {
 }
 
 fn solve_p1() {
-    let data = get_data_from_file("d1").unwrap();
-    let ints = lines_to_ints(&data);
+    let data = helpers::get_data_from_file("d1").unwrap();
+    let ints = helpers::lines_to_ints(&data);
     let sum: i32 = ints.iter().map(|&x| compute_module_fuel(x)).sum();
     println!("Part 1 result is: {}", sum);
     assert_eq!(sum, 3358992);
 }
 
 fn solve_p2() {
-    let data = get_data_from_file("d1").unwrap();
-    let ints = lines_to_ints(&data);
+    let data = helpers::get_data_from_file("d1").unwrap();
+    let ints = helpers::lines_to_ints(&data);
     let sum: i32 = ints.iter().map(|&x| compute_module_fuel_realistic(x)).sum();
     println!("Part 2 result is: {}", sum);
     assert_eq!(sum, 5035632);
