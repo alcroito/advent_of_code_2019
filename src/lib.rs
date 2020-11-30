@@ -55,16 +55,64 @@ pub mod int_code_computer {
     }
 
     #[derive(PartialEq, Debug)]
+    enum ParamType {
+        Read(ParamMode),
+        Write(ParamMode),
+    }
+
+    #[derive(PartialEq, Debug)]
+    struct Nullary;
+    #[derive(PartialEq, Debug)]
+    struct Unary(ParamType);
+    #[derive(PartialEq, Debug)]
+    struct Binary(ParamType, ParamType);
+    #[derive(PartialEq, Debug)]
+    struct Ternary(ParamType, ParamType, ParamType);
+
+    impl Unary {
+        fn get_arity(&self) -> InstrArity {
+            InstrArity::Unary(self)
+        }
+    }
+
+    impl Binary {
+        fn get_arity(&self) -> InstrArity {
+            InstrArity::Binary(self)
+        }
+    }
+
+    impl Ternary {
+        fn get_arity(&self) -> InstrArity {
+            InstrArity::Ternary(self)
+        }
+    }
+
+    #[derive(PartialEq, Debug)]
+    enum InstrArity<'a> {
+        Unary(&'a Unary),
+        Binary(&'a Binary),
+        Ternary(&'a Ternary),
+    }
+
+    type ParamValue = i64;
+
+    enum InstrParams {
+        Unary(ParamValue),
+        Binary(ParamValue, ParamValue),
+        Ternary(ParamValue, ParamValue, ParamValue),
+    }
+
+    #[derive(PartialEq, Debug)]
     enum Instr {
-        Add(ParamMode, ParamMode, ParamMode),
-        Multiply(ParamMode, ParamMode, ParamMode),
-        Input,
-        Output(ParamMode),
-        JumpIfTrue(ParamMode, ParamMode),
-        JumpIfFalse(ParamMode, ParamMode),
-        LessThan(ParamMode, ParamMode),
-        Equals(ParamMode, ParamMode),
-        Halt,
+        Add(Ternary),
+        Multiply(Ternary),
+        Input(Unary),
+        Output(Unary),
+        JumpIfTrue(Binary),
+        JumpIfFalse(Binary),
+        LessThan(Ternary),
+        Equals(Ternary),
+        Halt(Nullary),
     }
 
     #[derive(Debug)]
@@ -151,109 +199,142 @@ pub mod int_code_computer {
             &self.memory
         }
 
+        fn get_instr_param(&self, addr: i64, param_type: &ParamType) -> ParamValue {
+            match param_type {
+                ParamType::Read(p_mode) => self.get_value_for_operand(addr, p_mode),
+                ParamType::Write(..) => self.get_addr_for_memory_write(addr) as i64,
+            }
+        }
+
+        fn get_instr_params(&self, arity: &InstrArity) -> InstrParams {
+            match arity {
+                InstrArity::Unary(Unary(p1_type)) => {
+                    InstrParams::Unary(self.get_instr_param(self.ip + 1, p1_type))
+                }
+                InstrArity::Binary(Binary(p1_type, p2_type)) => InstrParams::Binary(
+                    self.get_instr_param(self.ip + 1, p1_type),
+                    self.get_instr_param(self.ip + 2, p2_type),
+                ),
+                InstrArity::Ternary(Ternary(p1_type, p2_type, p3_type)) => InstrParams::Ternary(
+                    self.get_instr_param(self.ip + 1, p1_type),
+                    self.get_instr_param(self.ip + 2, p2_type),
+                    self.get_instr_param(self.ip + 3, p3_type),
+                ),
+            }
+        }
+
         fn run_instruction(&mut self, instr: Instr) -> InstrResult {
-            match &instr {
-                Instr::Add(p1, p2, _) => {
-                    let in1 = self.get_value_for_operand(self.ip + 1, p1);
-                    let in2 = self.get_value_for_operand(self.ip + 2, p2);
-                    let out_addr = self.get_addr_for_memory_write(self.ip + 3);
-                    let result = in1 + in2;
-                    self.set_value_at_address(out_addr as i64, result);
-                    if self.debug {
-                        println!("Adding {}+{}={} to address {}", in1, in2, result, out_addr);
+            match instr {
+                Instr::Add(ref arity) => {
+                    if let InstrParams::Ternary(in1, in2, out_addr) =
+                        self.get_instr_params(&arity.get_arity())
+                    {
+                        let result = in1 + in2;
+                        self.set_value_at_address(out_addr as i64, result);
+                        if self.debug {
+                            println!("Adding {}+{}={} to address {}", in1, in2, result, out_addr);
+                        }
                     }
                     instr.result(None)
                 }
-                Instr::Multiply(p1, p2, _) => {
-                    let in1 = self.get_value_for_operand(self.ip + 1, p1);
-                    let in2 = self.get_value_for_operand(self.ip + 2, p2);
-                    let out_addr = self.get_addr_for_memory_write(self.ip + 3);
-                    let result = in1 * in2;
-                    self.set_value_at_address(out_addr as i64, result);
-                    if self.debug {
-                        println!(
-                            "Multiplying {}+{}={} to address {}",
-                            in1, in2, result, out_addr
-                        );
+                Instr::Multiply(ref arity) => {
+                    if let InstrParams::Ternary(in1, in2, out_addr) =
+                        self.get_instr_params(&arity.get_arity())
+                    {
+                        let result = in1 * in2;
+                        self.set_value_at_address(out_addr as i64, result);
+                        if self.debug {
+                            println!(
+                                "Multiplying {}+{}={} to address {}",
+                                in1, in2, result, out_addr
+                            );
+                        }
                     }
                     instr.result(None)
                 }
-                Instr::Input => {
-                    let out_addr = self.get_addr_for_memory_write(self.ip + 1);
-                    let value = self.take_one_input_value();
-                    self.set_value_at_address(out_addr as i64, value);
-                    if self.debug {
-                        println!("Adding new input {} to address {}", value, out_addr);
+                Instr::Input(ref arity) => {
+                    if let InstrParams::Unary(out_addr) = self.get_instr_params(&arity.get_arity())
+                    {
+                        let value = self.take_one_input_value();
+                        self.set_value_at_address(out_addr as i64, value);
+                        if self.debug {
+                            println!("Adding new input {} to address {}", value, out_addr);
+                        }
                     }
                     instr.result(None)
                 }
-                Instr::Output(p1) => {
-                    let in1 = self.get_value_for_operand(self.ip + 1, p1);
-                    self.add_output_value(in1);
-                    if self.debug {
-                        println!("Adding new output {}", in1);
+                Instr::Output(ref arity) => {
+                    if let InstrParams::Unary(in1) = self.get_instr_params(&arity.get_arity()) {
+                        self.add_output_value(in1);
+                        if self.debug {
+                            println!("Adding new output {}", in1);
+                        }
                     }
                     instr.result(None)
                 }
-                Instr::JumpIfTrue(p1, p2) => {
-                    let in1 = self.get_value_for_operand(self.ip + 1, p1);
-                    let in2 = self.get_value_for_operand(self.ip + 2, p2);
+                Instr::JumpIfTrue(ref arity) => {
                     let mut ip_delta = 3;
-                    if in1 != 0 {
-                        ip_delta = in2 - self.ip;
-                    }
-                    if self.debug {
-                        println!("Jumping, advancing IP by {}", ip_delta);
+                    if let InstrParams::Binary(in1, in2) = self.get_instr_params(&arity.get_arity())
+                    {
+                        if in1 != 0 {
+                            ip_delta = in2 - self.ip;
+                        }
+                        if self.debug {
+                            println!("Jumping, advancing IP by {}", ip_delta);
+                        }
                     }
                     instr.result(Some(ip_delta))
                 }
-                Instr::JumpIfFalse(p1, p2) => {
-                    let in1 = self.get_value_for_operand(self.ip + 1, p1);
-                    let in2 = self.get_value_for_operand(self.ip + 2, p2);
+                Instr::JumpIfFalse(ref arity) => {
                     let mut ip_delta = 3;
-                    if in1 == 0 {
-                        ip_delta = in2 - self.ip;
-                    }
-                    if self.debug {
-                        println!("Jumping, advancing IP by {}", ip_delta);
+                    if let InstrParams::Binary(in1, in2) = self.get_instr_params(&arity.get_arity())
+                    {
+                        if in1 == 0 {
+                            ip_delta = in2 - self.ip;
+                        }
+                        if self.debug {
+                            println!("Jumping, advancing IP by {}", ip_delta);
+                        }
                     }
                     instr.result(Some(ip_delta))
                 }
-                Instr::LessThan(p1, p2) => {
-                    let in1 = self.get_value_for_operand(self.ip + 1, p1);
-                    let in2 = self.get_value_for_operand(self.ip + 2, p2);
-                    let out_addr = self.get_addr_for_memory_write(self.ip + 3);
-                    let mut value = 0;
-                    if in1 < in2 {
-                        value = 1;
-                    }
-                    self.set_value_at_address(out_addr as i64, value);
-                    if self.debug {
-                        println!(
-                            "Conditional assignment, setting address {} to {}",
-                            out_addr, value
-                        );
+                Instr::LessThan(ref arity) => {
+                    if let InstrParams::Ternary(in1, in2, out_addr) =
+                        self.get_instr_params(&arity.get_arity())
+                    {
+                        let mut value = 0;
+                        if in1 < in2 {
+                            value = 1;
+                        }
+                        self.set_value_at_address(out_addr as i64, value);
+                        if self.debug {
+                            println!(
+                                "Conditional assignment, setting address {} to {}",
+                                out_addr, value
+                            );
+                        }
                     }
                     instr.result(None)
                 }
-                Instr::Equals(p1, p2) => {
-                    let in1 = self.get_value_for_operand(self.ip + 1, p1);
-                    let in2 = self.get_value_for_operand(self.ip + 2, p2);
-                    let out_addr = self.get_addr_for_memory_write(self.ip + 3);
-                    let mut value = 0;
-                    if in1 == in2 {
-                        value = 1;
+                Instr::Equals(ref arity) => {
+                    if let InstrParams::Ternary(in1, in2, out_addr) =
+                        self.get_instr_params(&arity.get_arity())
+                    {
+                        let mut value = 0;
+                        if in1 == in2 {
+                            value = 1;
+                        }
+                        if self.debug {
+                            println!(
+                                "Conditional assignment, setting address {} to {}",
+                                out_addr, value
+                            );
+                        }
+                        self.set_value_at_address(out_addr as i64, value);
                     }
-                    if self.debug {
-                        println!(
-                            "Conditional assignment, setting address {} to {}",
-                            out_addr, value
-                        );
-                    }
-                    self.set_value_at_address(out_addr as i64, value);
                     instr.result(None)
                 }
-                Instr::Halt => {
+                Instr::Halt(..) => {
                     if self.debug {
                         println!("Halting!");
                     }
@@ -290,15 +371,37 @@ pub mod int_code_computer {
             let p3_mode = ParamMode::from(mode).unwrap();
 
             match op_code {
-                1 => Some(Instr::Add(p1_mode, p2_mode, p3_mode)),
-                2 => Some(Instr::Multiply(p1_mode, p2_mode, p3_mode)),
-                3 => Some(Instr::Input),
-                4 => Some(Instr::Output(p1_mode)),
-                5 => Some(Instr::JumpIfTrue(p1_mode, p2_mode)),
-                6 => Some(Instr::JumpIfFalse(p1_mode, p2_mode)),
-                7 => Some(Instr::LessThan(p1_mode, p2_mode)),
-                8 => Some(Instr::Equals(p1_mode, p2_mode)),
-                99 => Some(Instr::Halt),
+                1 => Some(Instr::Add(Ternary(
+                    ParamType::Read(p1_mode),
+                    ParamType::Read(p2_mode),
+                    ParamType::Write(p3_mode),
+                ))),
+                2 => Some(Instr::Multiply(Ternary(
+                    ParamType::Read(p1_mode),
+                    ParamType::Read(p2_mode),
+                    ParamType::Write(p3_mode),
+                ))),
+                3 => Some(Instr::Input(Unary(ParamType::Write(p1_mode)))),
+                4 => Some(Instr::Output(Unary(ParamType::Read(p1_mode)))),
+                5 => Some(Instr::JumpIfTrue(Binary(
+                    ParamType::Read(p1_mode),
+                    ParamType::Read(p2_mode),
+                ))),
+                6 => Some(Instr::JumpIfFalse(Binary(
+                    ParamType::Read(p1_mode),
+                    ParamType::Read(p2_mode),
+                ))),
+                7 => Some(Instr::LessThan(Ternary(
+                    ParamType::Read(p1_mode),
+                    ParamType::Read(p2_mode),
+                    ParamType::Write(p3_mode),
+                ))),
+                8 => Some(Instr::Equals(Ternary(
+                    ParamType::Read(p1_mode),
+                    ParamType::Read(p2_mode),
+                    ParamType::Write(p3_mode),
+                ))),
+                99 => Some(Instr::Halt(Nullary)),
                 _ => None,
             }
         }
@@ -307,13 +410,13 @@ pub mod int_code_computer {
             match self {
                 Instr::Add(..) => InstrResult::AdvanceIP(4),
                 Instr::Multiply(..) => InstrResult::AdvanceIP(4),
-                Instr::Input => InstrResult::AdvanceIP(2),
+                Instr::Input(..) => InstrResult::AdvanceIP(2),
                 Instr::Output(..) => InstrResult::AdvanceIP(2),
                 Instr::JumpIfTrue(..) => InstrResult::AdvanceIP(ip_delta.unwrap()),
                 Instr::JumpIfFalse(..) => InstrResult::AdvanceIP(ip_delta.unwrap()),
                 Instr::LessThan(..) => InstrResult::AdvanceIP(4),
                 Instr::Equals(..) => InstrResult::AdvanceIP(4),
-                Instr::Halt => InstrResult::Halt,
+                Instr::Halt(..) => InstrResult::Halt,
             }
         }
     }
@@ -356,16 +459,16 @@ pub mod int_code_computer {
 
     #[test]
     fn test_computer_d5() {
-        let a = Instr::Multiply(
-            ParamMode::Position,
-            ParamMode::Immediate,
-            ParamMode::Position,
-        );
+        let a = Instr::Multiply(Ternary(
+            ParamType::Read(ParamMode::Position),
+            ParamType::Read(ParamMode::Immediate),
+            ParamType::Write(ParamMode::Position),
+        ));
         check_decoded_instruction(1002, a);
 
-        check_decoded_instruction(99, Instr::Halt);
+        check_decoded_instruction(99, Instr::Halt(Nullary));
 
-        let a = Instr::Input;
+        let a = Instr::Input(Unary(ParamType::Write(ParamMode::Immediate)));
         check_decoded_instruction(11103, a);
 
         // Comparison tests.
