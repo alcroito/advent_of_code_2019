@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate more_asserts;
+extern crate derive_more;
 
 pub mod helpers {
     use std::fs;
@@ -41,6 +42,7 @@ pub mod helpers {
 
 pub mod int_code_computer {
     use std::collections::VecDeque;
+    use derive_more::From;
 
     #[derive(Debug)]
     enum InstrResult {
@@ -69,25 +71,7 @@ pub mod int_code_computer {
     #[derive(PartialEq, Debug)]
     struct Ternary(ParamType, ParamType, ParamType);
 
-    impl Unary {
-        fn get_arity(&self) -> InstrArity {
-            InstrArity::Unary(self)
-        }
-    }
-
-    impl Binary {
-        fn get_arity(&self) -> InstrArity {
-            InstrArity::Binary(self)
-        }
-    }
-
-    impl Ternary {
-        fn get_arity(&self) -> InstrArity {
-            InstrArity::Ternary(self)
-        }
-    }
-
-    #[derive(PartialEq, Debug)]
+    #[derive(PartialEq, Debug, From)]
     enum InstrArity<'a> {
         Unary(&'a Unary),
         Binary(&'a Binary),
@@ -227,7 +211,7 @@ pub mod int_code_computer {
             match instr {
                 Instr::Add(ref arity) => {
                     if let InstrParams::Ternary(in1, in2, out_addr) =
-                        self.get_instr_params(&arity.get_arity())
+                        self.get_instr_params(&arity.into())
                     {
                         let result = in1 + in2;
                         self.set_value_at_address(out_addr as i64, result);
@@ -239,7 +223,7 @@ pub mod int_code_computer {
                 }
                 Instr::Multiply(ref arity) => {
                     if let InstrParams::Ternary(in1, in2, out_addr) =
-                        self.get_instr_params(&arity.get_arity())
+                        self.get_instr_params(&arity.into())
                     {
                         let result = in1 * in2;
                         self.set_value_at_address(out_addr as i64, result);
@@ -253,7 +237,7 @@ pub mod int_code_computer {
                     instr.result(None)
                 }
                 Instr::Input(ref arity) => {
-                    if let InstrParams::Unary(out_addr) = self.get_instr_params(&arity.get_arity())
+                    if let InstrParams::Unary(out_addr) = self.get_instr_params(&arity.into())
                     {
                         let value = self.take_one_input_value();
                         self.set_value_at_address(out_addr as i64, value);
@@ -264,7 +248,7 @@ pub mod int_code_computer {
                     instr.result(None)
                 }
                 Instr::Output(ref arity) => {
-                    if let InstrParams::Unary(in1) = self.get_instr_params(&arity.get_arity()) {
+                    if let InstrParams::Unary(in1) = self.get_instr_params(&arity.into()) {
                         self.add_output_value(in1);
                         if self.debug {
                             println!("Adding new output {}", in1);
@@ -274,7 +258,7 @@ pub mod int_code_computer {
                 }
                 Instr::JumpIfTrue(ref arity) => {
                     let mut ip_delta = 3;
-                    if let InstrParams::Binary(in1, in2) = self.get_instr_params(&arity.get_arity())
+                    if let InstrParams::Binary(in1, in2) = self.get_instr_params(&arity.into())
                     {
                         if in1 != 0 {
                             ip_delta = in2 - self.ip;
@@ -287,7 +271,7 @@ pub mod int_code_computer {
                 }
                 Instr::JumpIfFalse(ref arity) => {
                     let mut ip_delta = 3;
-                    if let InstrParams::Binary(in1, in2) = self.get_instr_params(&arity.get_arity())
+                    if let InstrParams::Binary(in1, in2) = self.get_instr_params(&arity.into())
                     {
                         if in1 == 0 {
                             ip_delta = in2 - self.ip;
@@ -300,7 +284,7 @@ pub mod int_code_computer {
                 }
                 Instr::LessThan(ref arity) => {
                     if let InstrParams::Ternary(in1, in2, out_addr) =
-                        self.get_instr_params(&arity.get_arity())
+                        self.get_instr_params(&arity.into())
                     {
                         let mut value = 0;
                         if in1 < in2 {
@@ -318,7 +302,7 @@ pub mod int_code_computer {
                 }
                 Instr::Equals(ref arity) => {
                     if let InstrParams::Ternary(in1, in2, out_addr) =
-                        self.get_instr_params(&arity.get_arity())
+                        self.get_instr_params(&arity.into())
                     {
                         let mut value = 0;
                         if in1 == in2 {
